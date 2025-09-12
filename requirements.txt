@@ -1,0 +1,18 @@
+# Core
+sqlalchemy
+psycopg2-binary
+python-dotenv
+
+# API
+fastapi
+uvicorn[standard]
+
+# Normalization (HTML/PDF parsing)
+beautifulsoup4
+PyPDF2
+
+# Embeddings
+openai
+sentence-transformers
+numpy
+torch   # sentence-transformers が内部依存で使う

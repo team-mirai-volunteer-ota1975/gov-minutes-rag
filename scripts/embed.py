@@ -1,3 +1,4 @@
+import re
 import os
 import sys
 import time
@@ -237,7 +238,7 @@ def insert_chunks(engine: Engine, doc_id: uuid.UUID, chunks: List[str], embeddin
     sql = text(
         """
         INSERT INTO meeting_chunks (doc_id, chunk_text, embedding)
-        VALUES (:doc_id, :chunk_text, :embedding::vector)
+        VALUES (:doc_id, :chunk_text, CAST(:embedding AS vector))
         """
     )
     count = 0
@@ -297,4 +298,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
