@@ -101,11 +101,11 @@ def search(req: SearchRequest) -> List[Dict[str, Any]]:
     sql = text(
         """
         SELECT m.url, m.council_name, m.date, c.chunk_text,
-               1 - (c.embedding <=> CAST(:query_vec AS vector)) AS score
+               1 - (c.embedding <=> :query_vec::vector) AS score
         FROM meeting_chunks c
         JOIN meeting_metadata m ON c.doc_id = m.doc_id
         WHERE (:ministry IS NULL OR m.ministry = :ministry)
-        ORDER BY c.embedding <=> CAST(:query_vec AS vector)
+        ORDER BY c.embedding <=> :query_vec::vector
         LIMIT :top_k
         """
     )
@@ -127,3 +127,4 @@ def search(req: SearchRequest) -> List[Dict[str, Any]]:
             "score": float(r[4]) if r[4] is not None else None,
         })
     return results
+
