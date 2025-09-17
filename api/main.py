@@ -101,11 +101,11 @@ def search(req: SearchRequest) -> List[Dict[str, Any]]:
     sql = text(
         """
         SELECT m.url, m.council_name, m.date, c.chunk_text,
-               1 - (c.embedding <=> :query_vec::vector) AS score
+               1 - (c.embedding <=> CAST(:query_vec AS vector)) AS score
         FROM meeting_chunks c
         JOIN meeting_metadata m ON c.doc_id = m.doc_id
         WHERE (:ministry IS NULL OR m.ministry = :ministry)
-        ORDER BY c.embedding <=> :query_vec::vector
+        ORDER BY c.embedding <=> CAST(:query_vec AS vector)
         LIMIT :top_k
         """
     )
@@ -151,10 +151,10 @@ def compare_search(req: CompareRequest) -> Dict[str, Any]:
     sql_chunks = text(
         """
         SELECT c.doc_id::text, m.url, c.chunk_text,
-               1 - (c.embedding <=> :query_vec::vector) AS score
+            1 - (c.embedding <=> CAST(:query_vec AS vector)) AS score
         FROM meeting_chunks c
         JOIN meeting_metadata m USING (doc_id)
-        ORDER BY c.embedding <=> :query_vec::vector
+        ORDER BY c.embedding <=> CAST(:query_vec AS vector)
         LIMIT :top_k
         """
     )
@@ -162,10 +162,10 @@ def compare_search(req: CompareRequest) -> Dict[str, Any]:
     sql_summaries = text(
         """
         SELECT s.doc_id::text, m.url, s.summary,
-               1 - (s.embedding <=> :query_vec::vector) AS score
+            1 - (s.embedding <=> CAST(:query_vec AS vector)) AS score
         FROM chunks_summary s
         JOIN meeting_metadata m USING (doc_id)
-        ORDER BY s.embedding <=> :query_vec::vector
+        ORDER BY s.embedding <=> CAST(:query_vec AS vector)
         LIMIT :top_k
         """
     )
