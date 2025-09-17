@@ -128,3 +128,76 @@ def search(req: SearchRequest) -> List[Dict[str, Any]]:
         })
     return results
 
+
+class CompareRequest(BaseModel):
+    query: str
+    top_k: int = 5
+
+
+@app.post("/debug/compare_search")
+def compare_search(req: CompareRequest) -> Dict[str, Any]:
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=400, detail="query is required")
+    top_k = max(1, min(100, req.top_k or 5))
+
+    # Embed query
+    try:
+        vec = provider.embed([req.query])[0]
+    except Exception as e:
+        logger.exception(f"Embedding failed: {e}")
+        raise HTTPException(status_code=500, detail=f"embedding failed: {e}")
+    vec_lit = vector_literal(vec)
+
+    sql_chunks = text(
+        """
+        SELECT c.doc_id::text, m.url, c.chunk_text,
+               1 - (c.embedding <=> :query_vec::vector) AS score
+        FROM meeting_chunks c
+        JOIN meeting_metadata m USING (doc_id)
+        ORDER BY c.embedding <=> :query_vec::vector
+        LIMIT :top_k
+        """
+    )
+
+    sql_summaries = text(
+        """
+        SELECT s.doc_id::text, m.url, s.summary,
+               1 - (s.embedding <=> :query_vec::vector) AS score
+        FROM chunks_summary s
+        JOIN meeting_metadata m USING (doc_id)
+        ORDER BY s.embedding <=> :query_vec::vector
+        LIMIT :top_k
+        """
+    )
+
+    try:
+        with engine.begin() as conn:
+            rows_chunks = conn.execute(sql_chunks, {"query_vec": vec_lit, "top_k": top_k}).fetchall()
+            rows_summ = conn.execute(sql_summaries, {"query_vec": vec_lit, "top_k": top_k}).fetchall()
+    except Exception as e:
+        logger.exception(f"DB query failed: {e}")
+        raise HTTPException(status_code=500, detail=f"db query failed: {e}")
+
+    chunks_out: List[Dict[str, Any]] = []
+    for r in rows_chunks:
+        chunks_out.append({
+            "doc_id": r[0],
+            "url": r[1],
+            "text": r[2],
+            "score": float(r[3]) if r[3] is not None else None,
+        })
+
+    summaries_out: List[Dict[str, Any]] = []
+    for r in rows_summ:
+        summaries_out.append({
+            "doc_id": r[0],
+            "url": r[1],
+            "summary": r[2],
+            "score": float(r[3]) if r[3] is not None else None,
+        })
+
+    return {
+        "query": req.query,
+        "chunks": chunks_out,
+        "summaries": summaries_out,
+    }

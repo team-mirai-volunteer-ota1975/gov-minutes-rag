@@ -52,3 +52,13 @@ ON meeting_chunks USING hnsw (embedding vector_cosine_ops);
 -- Optional: trigram index for hybrid keyword search
 CREATE INDEX IF NOT EXISTS idx_meeting_chunks_trgm ON meeting_chunks USING gin (chunk_text gin_trgm_ops);
 
+-- Meeting-level summaries (Map→Reduce, 1 row per doc)
+CREATE TABLE IF NOT EXISTS chunks_summary (
+  doc_id      UUID PRIMARY KEY REFERENCES meeting_metadata(doc_id) ON DELETE CASCADE,
+  summary     TEXT NOT NULL,
+  topics      TEXT[] DEFAULT '{}',
+  model       TEXT,
+  embed_model TEXT,
+  embedding   VECTOR(1536) NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
