@@ -194,23 +194,21 @@ def extract_text_from_html_bytes(b: bytes) -> str:
 
 
 def extract_text_from_pdf_bytes(b: bytes) -> str:
-    # Try PyPDF2
     try:
-        import io
-        import PyPDF2  # type: ignore
-        reader = PyPDF2.PdfReader(io.BytesIO(b))
+        import fitz  # PyMuPDF
+        doc = fitz.open(stream=b, filetype="pdf")
         pages = []
-        for p in reader.pages:
+        for page in doc:
             try:
-                pages.append(p.extract_text() or "")
+                # "text" モードなら段落っぽく整形してくれる
+                text = page.get_text("text")
+                pages.append(text or "")
             except Exception:
                 continue
         return clean_text("\n\n".join(pages))
-    except Exception:
-        pass
-    # Fallback: bytes unavailable or extractor missing
-    logger.warning("PDF parsing failed or PyPDF2 not installed; returning empty text.")
-    return ""
+    except Exception as e:
+        logger.warning(f"PDF parsing failed with PyMuPDF: {e}")
+        return ""
 
 
 def extract_text_from_path(path: str) -> str:
