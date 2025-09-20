@@ -6,6 +6,7 @@ import uuid
 import logging
 import unicodedata
 from datetime import date
+from urllib.parse import urlparse
 from typing import Optional, Dict, Any, List, Tuple
 
 try:
@@ -37,6 +38,22 @@ JP_ERAS = {
     "明治": 1867,
 }
 
+DOMAIN_MINISTRY_MAP = {
+    "cao.go.jp": "内閣府",
+    "kantei.go.jp": "内閣府",
+    "soumu.go.jp": "総務省",
+    "moj.go.jp": "法務省",
+    "mofa.go.jp": "外務省",
+    "mof.go.jp": "財務省",
+    "mext.go.jp": "文部科学省",
+    "mhlw.go.jp": "厚生労働省",
+    "maff.go.jp": "農林水産省",
+    "meti.go.jp": "経済産業省",
+    "mlit.go.jp": "国土交通省",
+    "env.go.jp": "環境省",
+    "mod.go.jp": "防衛省",
+    "digital.go.jp": "デジタル庁",
+}
 
 def nfkc(s: str) -> str:
     if not s:
@@ -102,6 +119,28 @@ def parse_japanese_date(s: str) -> Optional[date]:
     return None
 
 
+def guess_ministry_from_url(url: str) -> Optional[str]:
+    if not url:
+        return None
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return None
+
+    netloc = (parsed.netloc or "").lower()
+    if not netloc:
+        return None
+
+    netloc = netloc.split("@")[-1]
+    netloc = netloc.split(":")[0]
+
+    for domain, ministry in DOMAIN_MINISTRY_MAP.items():
+        domain = domain.lower()
+        if netloc == domain or netloc.endswith(f".{domain}"):
+            return ministry
+    return None
+
+
 def guess_ministry(text: str) -> Optional[str]:
     if not text:
         return None
@@ -161,14 +200,31 @@ def extract_attendees(text: str) -> List[str]:
     return []
 
 
-def extract_agenda(text: str) -> List[str]:
-    # Heuristic: lines after 議題 or 議事
-    m = re.search(r"(議題|議事)[：:\n]\s*(.+)", text)
-    if m:
-        items = re.split(r"[\n、,]", m.group(2))
-        items = [i.strip() for i in items if i.strip()]
-        return items[:50]
-    return []
+def extract_agenda(text: str) -> str:
+    if not text:
+        return ""
+
+    # 開始位置を検索（議題 or 議事）
+    m = re.search(r"(議題|議事(?!要旨|概要|録))", text)
+    if not m:
+        return ""
+
+    start = m.start()
+
+    # そこから 200文字を切り出し
+    snippet = text[start:start + 200]
+
+    # 終了条件（出席者などの見出しが出たらそこで切る）
+    stop_keywords = ["出席者", "配布資料", "議事", "議事内容", "開会"]
+    stop_positions = [snippet.find(k) for k in stop_keywords if snippet.find(k) != -1]
+    if stop_positions:
+        end = min(stop_positions)
+        snippet = snippet[:end]
+
+    # 改行をスペースにリプレース
+    snippet = snippet.replace("\n", " ")
+
+    return snippet.strip()
 
 
 # -----------------------------
@@ -251,7 +307,7 @@ def upsert_meeting(engine: Engine, url: str, text_content: str, html_title: Opti
 
     discussion = clean_text(text_content)
     title_line = extract_title((html_title or "") + "\n" + discussion)
-    ministry = guess_ministry((html_title or "") + "\n" + discussion)
+    ministry = guess_ministry_from_url(url) or guess_ministry((html_title or "") + "\n" + discussion)
     meeting_no = extract_meeting_no(discussion)
     dt = parse_japanese_date((html_title or "") + "\n" + discussion)
     location = extract_location(discussion)
@@ -401,4 +457,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
