@@ -7,11 +7,15 @@ try:
     load_dotenv()
 except Exception:
     pass
-
+from rank_bm25 import BM25Okapi
+from fugashi import Tagger
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+
+
+tagger = Tagger()
 
 
 logging.basicConfig(
@@ -134,6 +138,11 @@ class CompareRequest(BaseModel):
     top_k: int = 5
 
 
+def tokenize(text: str) -> List[str]:
+    """fugashiで日本語分かち書き"""
+    return [word.surface for word in tagger(text)]
+
+
 @app.post("/debug/compare_search")
 def compare_search(req: CompareRequest) -> Dict[str, Any]:
     if not req.query or not req.query.strip():
@@ -178,6 +187,7 @@ def compare_search(req: CompareRequest) -> Dict[str, Any]:
         logger.exception(f"DB query failed: {e}")
         raise HTTPException(status_code=500, detail=f"db query failed: {e}")
 
+    # --- Chunks 出力 ---
     chunks_out: List[Dict[str, Any]] = []
     for r in rows_chunks:
         chunks_out.append({
@@ -187,6 +197,7 @@ def compare_search(req: CompareRequest) -> Dict[str, Any]:
             "score": float(r[3]) if r[3] is not None else None,
         })
 
+    # --- Summaries 出力 ---
     summaries_out: List[Dict[str, Any]] = []
     for r in rows_summ:
         summaries_out.append({
@@ -196,8 +207,24 @@ def compare_search(req: CompareRequest) -> Dict[str, Any]:
             "score": float(r[3]) if r[3] is not None else None,
         })
 
+    # --- BM25リランキング ---
+    query_tokens = tokenize(req.query)
+    docs_tokens = [tokenize(r[2]) for r in rows_summ]  # r[2] = summary text
+    bm25 = BM25Okapi(docs_tokens)
+    bm25_scores = bm25.get_scores(query_tokens)
+
+    rerank_summaries_out: List[Dict[str, Any]] = []
+    for r, score in sorted(zip(rows_summ, bm25_scores), key=lambda x: x[1], reverse=True):
+        rerank_summaries_out.append({
+            "doc_id": r[0],
+            "url": r[1],
+            "summary": r[2],
+            "score": float(score),
+        })
+
     return {
         "query": req.query,
         "chunks": chunks_out,
         "summaries": summaries_out,
+        "rerank_summaries": rerank_summaries_out,
     }

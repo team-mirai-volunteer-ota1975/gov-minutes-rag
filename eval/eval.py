@@ -31,7 +31,7 @@ def main():
                 data = resp.json()
 
                 # chunks と summaries 両方保存
-                for run in ["chunks", "summaries"]:
+                for run in ["chunks", "summaries", "rerank_summaries"]:
                     for rank, hit in enumerate(data[run], start=1):
                         # テキスト or サマリの先頭100文字だけ
                         text_snippet = (hit.get("text") or hit.get("summary") or "")
