@@ -1,4 +1,4 @@
-# Core
+﻿# Core
 sqlalchemy
 psycopg2-binary
 python-dotenv
@@ -15,4 +15,6 @@ PyPDF2
 openai
 sentence-transformers
 numpy
-torch   # sentence-transformers が内部依存で使う
+torch  # sentence-transformers soft dependency
+rank-bm25
+fugashi
