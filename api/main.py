@@ -133,6 +133,59 @@ def search(req: SearchRequest) -> List[Dict[str, Any]]:
     return results
 
 
+@app.post("/summary_search")
+def summary_search(req: SearchRequest) -> List[Dict[str, Any]]:
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=400, detail="query is required")
+    top_k = max(1, min(100, req.top_k or 5))
+
+    try:
+        vec = provider.embed([req.query])[0]
+    except Exception as e:
+        logger.exception(f"Embedding failed: {e}")
+        raise HTTPException(status_code=500, detail=f"embedding failed: {e}")
+    vec_lit = vector_literal(vec)
+
+    sql = text(
+        """
+        SELECT m.url, m.council_name, m.date, s.summary,
+               1 - (s.embedding <=> CAST(:query_vec AS vector)) AS score
+        FROM chunks_summary s
+        JOIN meeting_metadata m ON s.doc_id = m.doc_id
+        WHERE (:ministry IS NULL OR m.ministry = :ministry)
+        ORDER BY s.embedding <=> CAST(:query_vec AS vector)
+        LIMIT :top_k
+        """
+    )
+
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(
+                sql,
+                {
+                    "query_vec": vec_lit,
+                    "ministry": req.ministry,
+                    "top_k": top_k,
+                },
+            ).fetchall()
+    except Exception as e:
+        logger.exception(f"DB query failed: {e}")
+        raise HTTPException(status_code=500, detail=f"db query failed: {e}")
+
+    results: List[Dict[str, Any]] = []
+    for r in rows:
+        results.append(
+            {
+                "url": r[0],
+                "council_name": r[1],
+                "date": r[2].isoformat() if r[2] else None,
+                "summary": r[3],
+                "score": float(r[4]) if r[4] is not None else None,
+            }
+        )
+    return results
+
+
 class CompareRequest(BaseModel):
     query: str
     top_k: int = 5

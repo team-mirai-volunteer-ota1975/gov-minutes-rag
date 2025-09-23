@@ -1,41 +1,42 @@
-# gov-minutes-rag
+﻿# gov-minutes-rag
 
-日本の各省庁が公開している審議会・委員会の議事録を、RAG（Retrieval-Augmented Generation）で横断検索するための最小実装です。
+日本の各省庁が公開している審議会・委員会の議事録を横断検索するための RAG（Retrieval-Augmented Generation）基盤です。正規化・埋め込み・API までをワンストップで扱います。
 
 ## 機能概要
-- 正規化スクリプト（`scripts/normalize.py`）で、以下2系統のソースから議事録メタ情報を生成してDBにUPSERT保存します。
-  - DB: `crawled_pages`（URL, HTMLタイトル, content(BYTEA)のHTML/PDFなど）
-  - ローカル: `sample/` 配下のPDF/HTML/TXT
-- ベクトル化スクリプト（`scripts/embed.py`）で、本文をチャンク化し、埋め込みを生成して`meeting_chunks`へ保存します。
-- FastAPI（`api/main.py`）で、クエリをベクトル化してpgvector類似検索を実行する`/search`エンドポイントを提供します。
+- 正規化スクリプト（`scripts/normalize.py`）: DB や `sample/` 配下から議事録メタデータを抽出し、`meeting_metadata` に UPSERT します
+- ベクトル化スクリプト（`scripts/embed.py`）: 本文をチャンク・要約して埋め込みを生成し、`meeting_chunks` と `chunks_summary` に保存します
+- FastAPI（`api/main.py`）: 要約ベクトルのみを対象にした `/summary_search` エンドポイントを提供します
 
-## スキーマ
-`schema/rag_tables.sql` にDDLをまとめています（PostgreSQL + pgvector）。
+## スキーマ適用
+`schema/rag_tables.sql` に DDL をまとめています。PostgreSQL + pgvector 拡張を前提に以下を実行してください。
 
 ```
 psql $DATABASE_URL -f schema/rag_tables.sql
 ```
 
 ## セットアップ
-1. Python/Poetryやvenvを用意（任意）
-2. `.env` を作成（`.env.example`をコピーして編集）
-3. DBにDDL適用（pgvectorとpg_trgmが有効化されます）
+1. 必要に応じて venv / Poetry を用意
+2. `.env.example` をコピーして接続先などの環境変数を設定
+3. 上記のスキーマ適用を実行（pgvector / pg_trgm 拡張が有効化されます）
 
 ```bash
 cp .env.example .env
 psql postgresql://user:pass@localhost:5432/gov_minutes -f schema/rag_tables.sql
 ```
 
-Docker ComposeでPostgres+pgvectorを起動する場合:
+### Docker Compose での起動
+PostgreSQL（pgvector）と API をまとめて起動する場合:
 
 ```bash
 cd docker
-docker compose up -d db
-psql postgresql://gov:govpass@localhost:5432/gov_minutes -f ../schema/rag_tables.sql
+docker compose up -d
+docker compose exec db psql -U gov -d gov_minutes -f ../schema/rag_tables.sql
 ```
 
-## 正規化（メタ情報登録）
-`crawled_pages`テーブル（別システムで管理）から未処理URLを抽出、または`sample/`フォルダから読み込み、`meeting_metadata`にUPSERTします。
+API は `http://localhost:8000` で公開され、要約検索が利用できます。
+
+## 正規化とメタデータ登録
+`crawled_pages` テーブルや `sample/` フォルダから未処理の URL を抽出し、`meeting_metadata` に UPSERT します。
 
 ```bash
 python scripts/normalize.py --source both --limit 100
@@ -43,52 +44,61 @@ python scripts/normalize.py --source both --limit 100
 ```
 
 メモ:
-- URL一意でUPSERTし、`doc_id`は`uuid5(NAMESPACE_URL, url)`で安定化。
-- PDFは`PyPDF2`がある場合に抽出、無ければ空文字（警告）。HTMLは`BeautifulSoup`があればより精度良く抽出。
-- 会議名・会議番号・日付（和暦/全角対応）・場所・出席者・議題をヒューリスティックに抽出、難しい場合は空JSON。
+- URL をキーに UPSERT するため再実行しても安全
+- PDF は `PyPDF2` が存在すれば抽出、無ければ空文字（警告）
+- 会議名や日付などはヒューリスティックで抽出し、失敗した項目は空 JSON
 
-## チャンク化＆ベクトル化
-`meeting_metadata`で未埋め込みの文書を選び、本文（`discussion_text`）をチャンク化（約1200-2000文字、オーバーラップ200字）して埋め込みを生成し、`meeting_chunks`へ保存します。
+## チャンク化と埋め込み生成
+`meeting_metadata` から未埋め込みの議事録を選び、本文をチャンク化して `meeting_chunks`、要約を `chunks_summary` に格納します。
 
 ```bash
 python scripts/embed.py --limit-docs 50
 ```
 
-Embeddingプロバイダは `.env` で切り替え可能:
+## Embedding プロバイダ
+`.env` で指定できます。
 
-- `EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY`（`EMBEDDING_MODEL=text-embedding-3-small`等）
-- `EMBEDDING_PROVIDER=local`（`sentence-transformers`があればローカルモデル、無ければハッシュ擬似ベクトル）
+- `EMBEDDING_PROVIDER=openai`（`OPENAI_API_KEY` と `EMBEDDING_MODEL=text-embedding-3-small` などを指定）
+- `EMBEDDING_PROVIDER=local`（`sentence-transformers` を利用。未インストール時はハッシュ擬似ベクトルにフォールバック）
 
-レート制限に対して指数バックオフを実装済み（OpenAI）。
+OpenAI 実行時は指数バックオフでリトライします。
 
 ## API の起動
+ローカルで API を立ち上げる場合:
 
 ```bash
 uvicorn api.main:app --reload --port 8000
 ```
 
-検索例:
+Docker Compose で起動した場合は `docker compose up -d` 後に自動で `uvicorn` が開始されます。
+
+### `/summary_search`
+要約ベクトルのみを対象とした検索エンドポイントです。`top_k` は 1〜100、`ministry` で府省庁をフィルタできます。
 
 ```bash
-curl -X POST http://localhost:8000/search \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"感染症 審議会", "top_k":5, "ministry":"厚生労働省"}'
+curl -X POST http://localhost:8000/summary_search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"感染症対策", "top_k":5, "ministry":"厚生労働省"}'
 ```
 
 レスポンス例:
 
 ```json
 [
-  {"url":"https://example.go.jp/...","council_name":"厚生科学審議会 ...","date":"2025-07-23","chunk_text":"...","score":0.83}
+  {
+    "url": "https://example.go.jp/...",
+    "council_name": "厚生科学審議会...",
+    "date": "2025-07-23",
+    "summary": "...",
+    "score": 0.83
+  }
 ]
 ```
 
 ## ディレクトリ構成
-
 ```
 gov-minutes-rag/
   sample/
-    (PDF/HTMLを配置)
   schema/
     rag_tables.sql
   scripts/
@@ -103,13 +113,12 @@ gov-minutes-rag/
   README.md
 ```
 
-## 注意事項・再実行安全
-- `meeting_metadata.url`にユニーク制約、既存URLはUPSERTで更新。
-- `meeting_chunks`はドキュメント毎に再生成（既存削除→挿入）で重複を避けます。
-- `pgvector`のHNSWインデックス（cosine）と`pg_trgm`（ハイブリッド用途）を用意。
+## 注意事項と再実行のコツ
+- `meeting_metadata.url` にユニーク制約を設定し、既存 URL は UPSERT で更新
+- `meeting_chunks` / `chunks_summary` はドキュメント単位で再生成（既存削除→再挿入）して重複を回避
+- pgvector の HNSW インデックス（cosine）と `pg_trgm` インデックスを用意すると高速化できます
 
 ## よくあるトラブル
-- `openai` / `sentence-transformers` が未インストール: ローカル擬似ベクトルにフォールバックします（精度は出ません）。
-- PDF抽出が空: `PyPDF2`をインストール、または別の抽出器の導入を検討。
-- スキーマ未適用: `schema/rag_tables.sql`を必ず実行してください。
-
+- `openai` / `sentence-transformers` が未インストール: ローカル擬似ベクトルにフォールバック（精度は低下）
+- PDF 抽出が空になる: `PyPDF2` をインストール、または別抽出器の導入を検討
+- スキーマ未適用: `schema/rag_tables.sql` を必ず実行してください
