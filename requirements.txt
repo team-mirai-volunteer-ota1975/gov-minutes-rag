@@ -5,6 +5,7 @@ python-dotenv
 
 # API
 fastapi
+pydantic
 uvicorn[standard]
 
 # Normalization (HTML/PDF parsing)
@@ -16,5 +17,5 @@ openai
 sentence-transformers
 numpy
 torch  # sentence-transformers soft dependency
-rank-bm25
-fugashi
+# rank-bm25
+# fugashi
