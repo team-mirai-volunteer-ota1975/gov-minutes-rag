@@ -304,10 +304,10 @@ def hierarchical_reduce(client: OpenAIClient, model: str, partials: List[str]) -
         bullet_list = "\n".join(f"- {s}" for s in items)
         prompt = (
             "以下は同一会議の部分要約一覧です。重複を排除し、矛盾がある場合は保守的に統一してください。\n"
-            "政策担当者向けに、論点と結論/方向性が分かる要約（500〜800字）を作成し、\n"
+            "政策担当者向けに、論点と結論/方向性が分かる要約（1000字程度）を作成し、\n"
             "主要トピック（名詞中心）を3〜8語抽出してください。\n"
             "出力は次のJSONのみ：\n"
-            "{\n  \"summary\": \"政策担当者向け500〜800字要約\",\n  \"topics\": [\"...\", \"...\"]\n}\n"
+            "{\n  \"summary\": \"政策担当者向け1000字要約\",\n  \"topics\": [\"...\", \"...\"]\n}\n"
             "部分要約一覧:\n"
             f"{bullet_list}"
         )
@@ -346,9 +346,9 @@ def validate_reduce(obj: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(topics, list):
         raise ValueError("topics missing")
 
-    # enforce 500-800 chars
+    # enforce 100-1500 chars
     n = len(summary)
-    ok_len = 100 <= n <= 800
+    ok_len = 100 <= n <= 1500
     # normalize topics: nfkc + lower + dedupe + max len 20 chars, keep 3-8
     norm_topics: List[str] = []
     seen = set()

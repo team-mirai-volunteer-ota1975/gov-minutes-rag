@@ -156,42 +156,36 @@ def re_split_keep(pattern: str, s: str) -> List[str]:
     return out
 
 
-def chunk_text(text: str, target_chars: int = 1500, overlap_chars: int = 200) -> List[str]:
-    # Approximation: 300-500 tokens ~ 1200-2000 chars
-    paras = [p.strip() for p in text.split("\n\n") if p.strip()]
-    chunks: List[str] = []
-    cur = ""
-    for p in paras:
-        if len(cur) + len(p) + 2 <= target_chars:
-            cur = f"{cur}\n\n{p}" if cur else p
-        else:
-            if cur:
-                chunks.append(cur.strip())
-            # if paragraph itself too long, slice it
-            if len(p) > target_chars * 1.5:
-                start = 0
-                while start < len(p):
-                    end = min(len(p), start + target_chars)
-                    seg = p[start:end]
-                    chunks.append(seg.strip())
-                    start = max(end - overlap_chars, start + 1)
-                cur = ""
-            else:
-                cur = p
-    if cur:
-        chunks.append(cur.strip())
+def chunk_text(text: str, target_chars: int = 1000, overlap_chars: int = 100) -> List[str]:
+    """
+    Split `text` purely by character count with optional overlaps.
+    This keeps chunk sizes predictable and avoids paragraph-aware merging.
+    """
+    if target_chars <= 0:
+        raise ValueError("target_chars must be positive")
+    if overlap_chars < 0:
+        raise ValueError("overlap_chars must be non-negative")
 
-    # Add overlaps between chunks
-    with_overlaps: List[str] = []
-    for i, c in enumerate(chunks):
-        if i == 0:
-            with_overlaps.append(c)
-            continue
-        prev = chunks[i - 1]
-        tail = prev[-overlap_chars:]
-        merged = (tail + "\n\n" + c).strip()
-        with_overlaps.append(merged)
-    return with_overlaps
+    cleaned = text.strip()
+    if not cleaned:
+        return []
+
+    effective_overlap = min(overlap_chars, max(target_chars - 1, 0))
+    chunks: List[str] = []
+    start = 0
+    text_len = len(cleaned)
+
+    while start < text_len:
+        end = min(start + target_chars, text_len)
+        chunk = cleaned[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end == text_len:
+            break
+        # Move start forward while keeping the requested overlap
+        start = end - effective_overlap
+
+    return chunks
 
 
 # -----------------------------
